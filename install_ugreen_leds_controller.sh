@@ -16,7 +16,27 @@ cleanup() {
 
 # Variables
 REPO_URL="https://raw.githubusercontent.com/miskcoo/ugreen_leds_controller/refs/heads/gh-actions/build-scripts/truenas/build"
-SUPPORTED_VERSIONS=("24.10.0" "24.10.0.1" "24.10.0.2" "24.04.0" "24.04.1" "24.04.1.1" "24.04.2")
+KMOD_URLS=(
+    "https://github.com/miskcoo/ugreen_leds_controller/tree/gh-actions/build-scripts/truenas/build/TrueNAS-SCALE-ElectricEel"
+    "https://github.com/miskcoo/ugreen_leds_controller/tree/gh-actions/build-scripts/truenas/build/TrueNAS-SCALE-Dragonfish"
+)
+# Initialize an empty array for supported versions
+SUPPORTED_VERSIONS=()
+# Loop through each URL
+for URL in "${KMOD_URLS[@]}"; do
+    # Fetch the HTML content
+    HTML_CONTENT=$(curl -s "$URL")
+
+    # Extract version numbers by targeting the directory format
+    VERSIONS=$(echo "$HTML_CONTENT" | grep -oE 'TrueNAS-SCALE-[^/]*/[0-9]+(\.[0-9]+)*' | grep -oE '[0-9]+(\.[0-9]+)*')
+
+    # Append the versions to the SUPPORTED_VERSIONS array
+    while IFS= read -r VERSION; do
+        SUPPORTED_VERSIONS+=("$VERSION")
+    done <<< "$VERSIONS"
+done
+# Remove duplicates and sort versions
+SUPPORTED_VERSIONS=($(echo "${SUPPORTED_VERSIONS[@]}" | tr ' ' '\n' | sort -u))
 TRUENAS_VERSION=$(cat /etc/version | grep -oP '^[0-9]+\.[0-9]+(\.[0-9]+)?(\.[0-9]+)?')
 TRUENAS_SERIES=$(echo "$TRUENAS_VERSION" | cut -d'.' -f1,2)
 
@@ -58,9 +78,6 @@ echo "Remounting boot-pool datasets with write access..."
 mount -o remount,rw "${BOOT_POOL_PATH}/usr" || exit 1
 mount -o remount,rw "${BOOT_POOL_PATH}/etc" || exit 1
 
-# Clone the Ugreen LEDs Controller repository
-echo "Cloning Ugreen LEDs Controller repository..."
-
 # Get the current non-root user and their home directory
 INSTALL_USER=${SUDO_USER:-$USER}
 INSTALL_HOME=$(eval echo ~$INSTALL_USER)
@@ -79,7 +96,8 @@ cd "$INSTALL_HOME" || {
     exit 1; 
 }
 
-# Clone the repository
+# Clone the Ugreen LEDs Controller repository
+echo "Cloning Ugreen LEDs Controller repository..."
 if git clone https://github.com/miskcoo/ugreen_leds_controller.git "$INSTALL_DIR" -q; then
     # Change ownership to the original user
     chown -R $INSTALL_USER:$INSTALL_USER "$INSTALL_DIR"

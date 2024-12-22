@@ -7,6 +7,13 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Cleanup function to remove the ugreen_leds_controller folder
+cleanup() {
+    echo "Cleaning up..."
+    rm -rf "$INSTALL_DIR"
+    echo "Cleanup completed."
+}
+
 # Variables
 REPO_URL="https://raw.githubusercontent.com/miskcoo/ugreen_leds_controller/refs/heads/gh-actions/build-scripts/truenas/build"
 SUPPORTED_VERSIONS=("24.10.0" "24.10.0.1" "24.10.0.2" "24.04.0" "24.04.1" "24.04.1.1" "24.04.2")
@@ -103,17 +110,22 @@ echo "Loading kernel modules..."
 depmod
 modprobe -a i2c-dev led-ugreen ledtrig-oneshot ledtrig-netdev
 
-# Ask user if they want to modify the configuration file
-echo "Do you want to modify the LED configuration file now? (y/n)"
-read -r MODIFY_CONF
-if [[ "$MODIFY_CONF" == "y" ]]; then
-    nano "$INSTALL_DIR/scripts/ugreen-leds.conf"
+CONFIG_FILE="$INSTALL_HOME/ugreen-leds.conf"
+if [[ -f "$CONFIG_FILE" ]]; then
+    echo "Using existing configuration file at $CONFIG_FILE"
+    cp $CONFIG_FILE /etc/ugreen-leds.conf
+else
+    # Ask user if they want to modify the configuration file
+    echo "Do you want to modify the LED configuration file now? (y/n)"
+    read -r MODIFY_CONF
+    if [[ "$MODIFY_CONF" == "y" ]]; then
+        nano "$INSTALL_DIR/scripts/ugreen-leds.conf"
+    fi
+    # Copy the configuration file
+    cp $INSTALL_DIR/scripts/ugreen-leds.conf /etc/ugreen-leds.conf && cp $INSTALL_DIR/scripts/ugreen-leds.conf $CONFIG_FILE
+    chmod 644 /etc/ugreen-leds.conf
+    echo "Configuration file for ugreen-leds saved /etc/ugreen-leds.conf."
 fi
-
-# Copy the configuration file
-cp $INSTALL_DIR/scripts/ugreen-leds.conf /etc/ugreen-leds.conf
-chmod 644 /etc/ugreen-leds.conf
-echo "Configuration file for ugreen-leds saved /etc/ugreen-leds.conf."
 
 # Detect active network interfaces and configure services
 echo "Detecting network interfaces..."
@@ -150,6 +162,36 @@ else
     fi
 fi
 
+check_and_remove_existing_services() {
+    local service_name="ugreen-netdevmon"
+    
+    echo "Checking for existing services matching: ${service_name}@*.service"
+    
+    # Find all matching services in the specified location
+    for service in /etc/systemd/system/multi-user.target.wants/${service_name}@*.service; do
+        if [ -e "$service" ]; then
+            local interface=$(basename "$service" | sed "s/${service_name}@\(.*\)\.service/\1/")
+            echo "Found existing service for interface ${interface}. Removing..."
+            
+            # Stop the service if running
+            systemctl stop "${service_name}@${interface}.service" || echo "Warning: Failed to stop ${service_name}@${interface}.service"
+            
+            # Disable the service
+            systemctl disable "${service_name}@${interface}.service" || echo "Warning: Failed to disable ${service_name}@${interface}.service"
+            
+            # Remove the service file
+            rm -f "$service" || echo "Warning: Failed to remove service file"
+            
+            echo "Successfully removed ${service_name}@${interface}.service"
+        fi
+    done
+    
+    # Reload systemd daemon
+    systemctl daemon-reload
+}
+
+check_and_remove_existing_services
+
 # Copy scripts and configure services
 echo "Setting up systemd services..."
 cd $INSTALL_DIR
@@ -173,8 +215,11 @@ if [ ${#NETWORK_INTERFACES[@]} -eq 0 ]; then
     echo "Warning: No network interfaces detected. Skipping ugreen-netdevmon service setup."
 else
     echo "Enabling and starting ugreen-netdevmon service for interface: ${CHOSEN_INTERFACE}..."
-    systemctl start "ugreen-netdevmon@${CHOSEN_INTERFACE}"
     systemctl enable "ugreen-netdevmon@${CHOSEN_INTERFACE}"
+    systemctl restart "ugreen-netdevmon@${CHOSEN_INTERFACE}"
 fi
+
+# Call cleanup function
+cleanup
 
 echo "Setup complete. Reboot your system to verify."

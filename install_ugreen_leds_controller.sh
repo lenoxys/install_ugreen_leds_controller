@@ -99,6 +99,14 @@ check_required_commands() {
     done
 }
 
+# Helper function: Enable and start a systemd service
+enable_and_start_service() {
+    local service_name="$1"
+    echo "Enabling and starting $service_name..."
+    systemctl start "$service_name" || error_exit "Failed to start $service_name"
+    systemctl enable "$service_name" || error_exit "Failed to enable $service_name"
+}
+
 # Utility function for user yes/no prompts
 prompt_yes_no() {
     local prompt_text="$1"
@@ -417,9 +425,7 @@ fi
 cp scripts/systemd/*.service "$SYSTEMD_SYSTEM_DIR" || error_exit "Failed to copy systemd service files"
 systemctl daemon-reload || error_exit "Failed to reload systemd daemon"
 
-echo "Enabling and starting ugreen-diskiomon service..."
-systemctl start ugreen-diskiomon.service || error_exit "Failed to start ugreen-diskiomon.service"
-systemctl enable ugreen-diskiomon.service || error_exit "Failed to enable ugreen-diskiomon.service"
+enable_and_start_service "ugreen-diskiomon.service"
 
 if [ ${#NETWORK_INTERFACES[@]} -eq 0 ]; then
     echo "Warning: No network interfaces detected. Skipping ugreen-netdevmon service setup."
@@ -444,8 +450,7 @@ fi
 # Check if BLINK_TYPE_POWER is enabled
 if grep -qP '^BLINK_TYPE_POWER=(?!none$).+' "$CONFIG_FILE"; then
     echo "Enabling and starting ugreen-power-led.service because BLINK_TYPE_POWER is set."
-    systemctl enable ugreen-power-led.service || error_exit "Failed to enable ugreen-power-led.service"
-    systemctl start ugreen-power-led.service || error_exit "Failed to start ugreen-power-led.service"
+    enable_and_start_service "ugreen-power-led.service"
 else
     echo "BLINK_TYPE_POWER is set to 'none', not enabling ugreen-power-led.service."
 fi

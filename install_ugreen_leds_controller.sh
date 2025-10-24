@@ -1,11 +1,70 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Script constants
+# ============================================================================
+# Configuration Section - Centralized Settings
+# ============================================================================
+
+# Script metadata
 readonly SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_VERSION="1.0.0"
+
+# Installation directories and paths
 readonly CLONE_DIR_NAME="ugreen_leds_controller"
-readonly MAX_RETRIES=3
+readonly KERNEL_MODULES_DIR="/lib/modules"
+readonly MODULES_LOAD_DIR="/etc/modules-load.d"
+readonly SYSTEMD_SYSTEM_DIR="/etc/systemd/system"
+readonly SCRIPTS_BIN_DIR="/usr/bin"
+readonly CONFIG_FILENAME="ugreen-leds.conf"
+readonly MODULES_LOAD_CONF="ugreen-led.conf"
+
+# Network and timeouts
 readonly CURL_TIMEOUT=30
+readonly MAX_RETRIES=3
+
+# Repository URLs
+readonly REPO_URL="https://raw.githubusercontent.com/miskcoo/ugreen_leds_controller/refs/heads/gh-actions/build-scripts/truenas/build"
+readonly REPO_HOME="https://github.com/miskcoo/ugreen_leds_controller"
+
+# Kernel modules to load
+readonly KERNEL_MODULES=("i2c-dev" "led-ugreen" "ledtrig-oneshot" "ledtrig-netdev")
+
+# Scripts to copy from repository
+readonly REPO_SCRIPTS=("ugreen-diskiomon" "ugreen-netdevmon" "ugreen-probe-leds" "ugreen-power-led")
+
+# Version mapping: series -> release name
+declare -A TRUENAS_SERIES_MAP=(
+    ["24.10"]="TrueNAS-SCALE-ElectricEel"
+    ["24.04"]="TrueNAS-SCALE-Dragonfish"
+    ["25.04"]="TrueNAS-SCALE-Fangtooth"
+)
+
+# Kernel module build URLs for version detection
+declare -a KMOD_URLS=(
+    "https://github.com/miskcoo/ugreen_leds_controller/tree/gh-actions/build-scripts/truenas/build/TrueNAS-SCALE-ElectricEel"
+    "https://github.com/miskcoo/ugreen_leds_controller/tree/gh-actions/build-scripts/truenas/build/TrueNAS-SCALE-Dragonfish"
+    "https://github.com/miskcoo/ugreen_leds_controller/tree/gh-actions/build-scripts/truenas/build/TrueNAS-SCALE-Fangtooth"
+)
+
+# Required system commands for pre-requisite checks
+readonly REQUIRED_COMMANDS=("curl" "git" "mount" "modprobe" "systemctl" "grep" "sed" "awk")
+
+# ============================================================================
+# Runtime Variables (populated during execution)
+# ============================================================================
+
+TRUENAS_VERSION=""
+CLONE_DIR=""
+INSTALL_DIR=""
+OS_VERSION=""
+TRUENAS_NAME=""
+MODULE_URL=""
+CONFIG_FILE=""
+TEMPLATE_CONFIG=""
+CHOSEN_INTERFACE=""
+NETWORK_INTERFACES=()
+ACTIVE_INTERFACES=()
+SUPPORTED_VERSIONS=()
 
 # Cleanup function to remove the ugreen_leds_controller folder
 cleanup() {
@@ -63,22 +122,6 @@ help() {
     echo "        but pre-built binaries might not exist. Use format X.Y.Z (X.Y.Z.W applicable as well)."
     echo
 }
-
-# Variables
-REPO_URL="https://raw.githubusercontent.com/miskcoo/ugreen_leds_controller/refs/heads/gh-actions/build-scripts/truenas/build"
-KMOD_URLS=(
-    "https://github.com/miskcoo/ugreen_leds_controller/tree/gh-actions/build-scripts/truenas/build/TrueNAS-SCALE-ElectricEel"
-    "https://github.com/miskcoo/ugreen_leds_controller/tree/gh-actions/build-scripts/truenas/build/TrueNAS-SCALE-Dragonfish"
-    "https://github.com/miskcoo/ugreen_leds_controller/tree/gh-actions/build-scripts/truenas/build/TrueNAS-SCALE-Fangtooth"
-)
-TRUENAS_VERSION=""
-
-# Version mapping: series -> release name
-declare -A TRUENAS_SERIES_MAP=(
-    ["24.10"]="TrueNAS-SCALE-ElectricEel"
-    ["24.04"]="TrueNAS-SCALE-Dragonfish"
-    ["25.04"]="TrueNAS-SCALE-Fangtooth"
-)
 
 # ============================================================================
 # Argument Parsing
@@ -221,27 +264,27 @@ fi
 
 # Install the kernel module
 echo "Installing the kernel module..."
-mkdir -p "/lib/modules/$(uname -r)/extra" || error_exit "Failed to create kernel module directory"
-curl -so "/lib/modules/$(uname -r)/extra/led-ugreen.ko" "${MODULE_URL}" || error_exit "Kernel module download failed"
-chmod 644 "/lib/modules/$(uname -r)/extra/led-ugreen.ko"
+mkdir -p "${KERNEL_MODULES_DIR}/$(uname -r)/extra" || error_exit "Failed to create kernel module directory"
+curl -so "${KERNEL_MODULES_DIR}/$(uname -r)/extra/led-ugreen.ko" "${MODULE_URL}" || error_exit "Kernel module download failed"
+chmod 644 "${KERNEL_MODULES_DIR}/$(uname -r)/extra/led-ugreen.ko"
 
 # Create kernel module load configuration
 echo "Creating kernel module load configuration..."
-if [ ! -w "/etc/modules-load.d/" ]; then
-    error_exit "No write permission to /etc/modules-load.d/. Make sure you're running as root."
+if [ ! -w "$MODULES_LOAD_DIR/" ]; then
+    error_exit "No write permission to $MODULES_LOAD_DIR/. Make sure you're running as root."
 fi
 
-cat <<EOL > /etc/modules-load.d/ugreen-led.conf
-i2c-dev
-led-ugreen
-ledtrig-oneshot
-ledtrig-netdev
+cat <<EOL > "$MODULES_LOAD_DIR/$MODULES_LOAD_CONF"
+${KERNEL_MODULES[0]}
+${KERNEL_MODULES[1]}
+${KERNEL_MODULES[2]}
+${KERNEL_MODULES[3]}
 EOL
-chmod 644 /etc/modules-load.d/ugreen-led.conf || error_exit "Failed to set permissions on /etc/modules-load.d/ugreen-led.conf"
+chmod 644 "$MODULES_LOAD_DIR/$MODULES_LOAD_CONF" || error_exit "Failed to set permissions on $MODULES_LOAD_DIR/$MODULES_LOAD_CONF"
 
 echo "Loading kernel modules..."
 depmod || error_exit "Failed to run depmod"
-modprobe -a i2c-dev led-ugreen ledtrig-oneshot ledtrig-netdev || error_exit "Failed to load kernel modules"
+modprobe -a "${KERNEL_MODULES[@]}" || error_exit "Failed to load kernel modules"
 
 # ============================================================================
 # Configuration File Setup
@@ -359,20 +402,19 @@ check_and_remove_existing_services
 echo "Setting up systemd services..."
 cd "$CLONE_DIR" || error_exit "Failed to change directory to $CLONE_DIR"
 
-scripts=("ugreen-diskiomon" "ugreen-netdevmon" "ugreen-probe-leds" "ugreen-power-led")
-for script in "${scripts[@]}"; do
+for script in "${REPO_SCRIPTS[@]}"; do
     if [ ! -f "scripts/$script" ]; then
         error_exit "Script not found: scripts/$script"
     fi
     chmod +x "scripts/$script" || error_exit "Failed to make script executable: scripts/$script"
-    cp "scripts/$script" /usr/bin || error_exit "Failed to copy script to /usr/bin: $script"
+    cp "scripts/$script" "$SCRIPTS_BIN_DIR" || error_exit "Failed to copy script to $SCRIPTS_BIN_DIR: $script"
 done
 
 # Verify systemd service files exist before copying
 if [ ! -d "scripts/systemd" ]; then
     error_exit "Systemd service directory not found: scripts/systemd"
 fi
-cp scripts/systemd/*.service /etc/systemd/system/ || error_exit "Failed to copy systemd service files"
+cp scripts/systemd/*.service "$SYSTEMD_SYSTEM_DIR" || error_exit "Failed to copy systemd service files"
 systemctl daemon-reload || error_exit "Failed to reload systemd daemon"
 
 echo "Enabling and starting ugreen-diskiomon service..."

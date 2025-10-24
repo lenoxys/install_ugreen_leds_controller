@@ -90,8 +90,7 @@ trap cleanup EXIT
 
 # Check for required commands
 check_required_commands() {
-    local required_cmds=("curl" "git" "mount" "modprobe" "systemctl" "grep" "sed" "awk")
-    for cmd in "${required_cmds[@]}"; do
+    for cmd in "${REQUIRED_COMMANDS[@]}"; do
         if ! command -v "$cmd" &> /dev/null; then
             error_exit "Required command not found: $cmd. Please install it and try again."
         fi

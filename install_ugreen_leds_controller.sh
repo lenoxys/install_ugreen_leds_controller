@@ -222,7 +222,7 @@ fi
 # Install the kernel module
 echo "Installing the kernel module..."
 mkdir -p "/lib/modules/$(uname -r)/extra" || error_exit "Failed to create kernel module directory"
-curl -s --max-time "$CURL_TIMEOUT" -o "/lib/modules/$(uname -r)/extra/led-ugreen.ko" "${MODULE_URL}" || error_exit "Kernel module download failed"
+curl -so "/lib/modules/$(uname -r)/extra/led-ugreen.ko" "${MODULE_URL}" || error_exit "Kernel module download failed"
 chmod 644 "/lib/modules/$(uname -r)/extra/led-ugreen.ko"
 
 # Create kernel module load configuration

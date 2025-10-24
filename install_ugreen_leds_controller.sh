@@ -50,6 +50,36 @@ declare -a KMOD_URLS=(
 readonly REQUIRED_COMMANDS=("curl" "git" "mount" "modprobe" "systemctl" "grep" "sed" "awk")
 
 # ============================================================================
+# Output Control Flags
+# ============================================================================
+
+VERBOSE=false
+QUIET=false
+
+# Helper function: Print message if not in quiet mode
+log_info() {
+    if [ "$QUIET" = false ]; then
+        echo "$@"
+    fi
+}
+
+# Helper function: Print message if in verbose mode
+log_verbose() {
+    if [ "$VERBOSE" = true ]; then
+        echo "[VERBOSE] $@"
+    fi
+}
+
+# Helper function: Print section header
+print_section() {
+    local section_title="$1"
+    echo ""
+    echo "─────────────────────────────────────────────────────────────────────────────"
+    echo "→ $section_title"
+    echo "─────────────────────────────────────────────────────────────────────────────"
+}
+
+# ============================================================================
 # Runtime Variables (populated during execution)
 # ============================================================================
 
@@ -121,11 +151,13 @@ prompt_yes_no() {
 help() {
     echo "Installation helper for ugreen_leds_controller. Needs to be run as root"
     echo
-    echo "Syntax: install_ugreen_leds_controller.sh [-h] [-v <version>]"
+    echo "Syntax: install_ugreen_leds_controller.sh [-h] [-v <version>] [-q] [-V]"
     echo "options:"
-    echo "-h      Print this help."
-    echo "-v      Use predefined TrueNAS version. If not specified it will be extracted from the OS," 
-    echo "        but pre-built binaries might not exist. Use format X.Y.Z (X.Y.Z.W applicable as well)."
+    echo "-h           Print this help."
+    echo "-v <version> Use predefined TrueNAS version. If not specified it will be extracted from the OS,"
+    echo "             but pre-built binaries might not exist. Use format X.Y.Z (X.Y.Z.W applicable as well)."
+    echo "-q           Quiet mode: suppress informational messages (errors always shown)."
+    echo "-V           Verbose mode: show detailed debug information."
     echo
 }
 
@@ -134,7 +166,7 @@ help() {
 # ============================================================================
 
 # Handle arguments first
-while getopts ":hv:" option; do
+while getopts ":hv:qV" option; do
     case "$option" in
         h)
             help
@@ -146,6 +178,12 @@ while getopts ":hv:" option; do
                 error_exit "Invalid version format: $TRUENAS_VERSION. Use format X.Y.Z (X.Y.Z.W applicable as well)."
             fi
             ;;
+        q)
+            QUIET=true
+            ;;
+        V)
+            VERBOSE=true
+            ;;
         \?)
             error_exit "Invalid command line option -${OPTARG}. Use -h for help."
     esac
@@ -154,6 +192,8 @@ done
 # ============================================================================
 # Pre-flight Checks
 # ============================================================================
+
+print_section "Pre-flight Checks"
 
 # Check for required commands
 check_required_commands
@@ -188,12 +228,12 @@ echo "╔═══════════════════════�
 echo "║         Ugreen LED Controller Installation Confirmation                    ║"
 echo "╚════════════════════════════════════════════════════════════════════════════╝"
 echo ""
-echo "This script will perform the following actions:"
-echo "  • Download and verify kernel module for TrueNAS ${TRUENAS_VERSION}"
-echo "  • Remount boot-pool datasets with write access"
-echo "  • Clone Ugreen LED Controller repository"
-echo "  • Install kernel modules and system services"
-echo "  • Configure LED control services"
+log_info "This script will perform the following actions:"
+log_info "  • Download and verify kernel module for TrueNAS ${TRUENAS_VERSION}"
+log_info "  • Remount boot-pool datasets with write access"
+log_info "  • Clone Ugreen LED Controller repository"
+log_info "  • Install kernel modules and system services"
+log_info "  • Configure LED control services"
 echo ""
 echo "⚠️  WARNING: This script modifies system files and mounts. Interruption may cause instability."
 echo ""
@@ -206,6 +246,8 @@ fi
 # ============================================================================
 # Version Detection and Validation
 # ============================================================================
+
+print_section "Version Detection and Validation"
 
 # Initialize an empty array for supported versions
 SUPPORTED_VERSIONS=()
@@ -245,6 +287,8 @@ fi
 # ============================================================================
 # Kernel Module Installation
 # ============================================================================
+
+print_section "Kernel Module Installation"
 
 MODULE_URL="${REPO_URL}/${TRUENAS_NAME}/${TRUENAS_VERSION}/led-ugreen.ko"
 
@@ -296,6 +340,8 @@ modprobe -a "${KERNEL_MODULES[@]}" || error_exit "Failed to load kernel modules"
 # Configuration File Setup
 # ============================================================================
 
+print_section "Configuration File Setup"
+
 CONFIG_FILE="$INSTALL_DIR/ugreen-leds.conf"
 TEMPLATE_CONFIG="$CLONE_DIR/scripts/ugreen-leds.conf"
 
@@ -344,6 +390,8 @@ fi
 # Network Interface Detection and Service Setup
 # ============================================================================
 
+print_section "Network Interface Detection"
+
 echo "Detecting network interfaces..."
 # Filter for physical network interfaces: exclude loopback, docker, bridges, virtual ethernet, and incus interfaces
 ACTIVE_INTERFACES=($(ip -br link show | awk '$1 !~ /^(lo|docker|veth|br-|vb|incus)/ && $2 == "UP" {print $1}'))
@@ -370,6 +418,8 @@ fi
 # ============================================================================
 # Service Management
 # ============================================================================
+
+print_section "Service Management"
 
 check_and_remove_existing_services() {
     local service_name="ugreen-netdevmon"
@@ -441,4 +491,18 @@ fi
 
 cleanup
 
-echo "Setup complete. Reboot your system to verify."
+print_section "Installation Complete"
+echo ""
+echo "✅ Ugreen LED Controller has been installed successfully!"
+echo ""
+echo "Next steps:"
+echo "  1. Reboot your system to load the kernel modules"
+echo "  2. Verify the LED status after reboot"
+echo ""
+echo "For troubleshooting, check:"
+echo "  • systemctl status ugreen-diskiomon.service"
+if [ -n "${CHOSEN_INTERFACE:-}" ]; then
+    echo "  • systemctl status ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
+fi
+echo "  • systemctl status ugreen-power-led.service"
+echo ""

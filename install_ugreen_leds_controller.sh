@@ -17,6 +17,19 @@ error_exit() {
 # Trap errors and cleanup
 trap cleanup EXIT
 
+# Utility function for user yes/no prompts
+prompt_yes_no() {
+    local prompt_text="$1"
+    local response
+    echo "$prompt_text (y/n)"
+    read -r response
+    if [[ "$response" != "y" && "$response" != "n" ]]; then
+        echo "Invalid input. Defaulting to 'n'."
+        response="n"
+    fi
+    [[ "$response" == "y" ]]
+}
+
 help() {
     echo "Installation helper for ugreen_leds_controller. Needs to be run as root"
     echo
@@ -37,6 +50,17 @@ KMOD_URLS=(
 )
 TRUENAS_VERSION=""
 
+# Version mapping: series -> release name
+declare -A TRUENAS_SERIES_MAP=(
+    ["24.10"]="TrueNAS-SCALE-ElectricEel"
+    ["24.04"]="TrueNAS-SCALE-Dragonfish"
+    ["25.04"]="TrueNAS-SCALE-Fangtooth"
+)
+
+# ============================================================================
+# Argument Parsing
+# ============================================================================
+
 # Handle arguments first
 while getopts ":hv:" option; do
     case "$option" in
@@ -54,6 +78,10 @@ while getopts ":hv:" option; do
             error_exit "Invalid command line option -${OPTARG}. Use -h for help."
     esac
 done
+
+# ============================================================================
+# Pre-flight Checks
+# ============================================================================
 
 # Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
@@ -76,6 +104,10 @@ fi
 # Set the clone directory
 CLONE_DIR="$INSTALL_DIR/ugreen_leds_controller"
 
+# ============================================================================
+# Version Detection and Validation
+# ============================================================================
+
 # Initialize an empty array for supported versions
 SUPPORTED_VERSIONS=()
 for URL in "${KMOD_URLS[@]}"; do
@@ -97,12 +129,9 @@ fi
 
 TRUENAS_SERIES=$(echo "$TRUENAS_VERSION" | cut -d'.' -f1,2)
 
-if [[ "$TRUENAS_SERIES" == "24.10" ]]; then
-    TRUENAS_NAME="TrueNAS-SCALE-ElectricEel"
-elif [[ "$TRUENAS_SERIES" == "24.04" ]]; then
-    TRUENAS_NAME="TrueNAS-SCALE-Dragonfish"
-elif [[ "$TRUENAS_SERIES" == "25.04" ]]; then
-    TRUENAS_NAME="TrueNAS-SCALE-Fangtooth"
+# Resolve TrueNAS series to release name
+if [[ -v TRUENAS_SERIES_MAP["$TRUENAS_SERIES"] ]]; then
+    TRUENAS_NAME="${TRUENAS_SERIES_MAP[$TRUENAS_SERIES]}"
 else
     error_exit "Unsupported TrueNAS SCALE version series: ${TRUENAS_SERIES}. Please build the kernel module manually."
 fi
@@ -110,6 +139,10 @@ fi
 if [[ ! " ${SUPPORTED_VERSIONS[@]} " =~ " ${TRUENAS_VERSION} " ]]; then
     error_exit "Unsupported TrueNAS SCALE version: ${TRUENAS_VERSION}. Please build the kernel module manually."
 fi
+
+# ============================================================================
+# Kernel Module Installation
+# ============================================================================
 
 MODULE_URL="${REPO_URL}/${TRUENAS_NAME}/${TRUENAS_VERSION}/led-ugreen.ko"
 
@@ -153,6 +186,10 @@ echo "Loading kernel modules..."
 depmod || error_exit "Failed to run depmod"
 modprobe -a i2c-dev led-ugreen ledtrig-oneshot ledtrig-netdev || error_exit "Failed to load kernel modules"
 
+# ============================================================================
+# Configuration File Setup
+# ============================================================================
+
 CONFIG_FILE="$INSTALL_DIR/ugreen-leds.conf"
 TEMPLATE_CONFIG="$CLONE_DIR/scripts/ugreen-leds.conf"
 
@@ -161,6 +198,18 @@ if [ ! -f "$TEMPLATE_CONFIG" ]; then
     error_exit "Template configuration file not found at $TEMPLATE_CONFIG"
 fi
 
+# Handle configuration file setup
+setup_config_file() {
+    local config_source="$1"
+    local should_edit="$2"
+    
+    if [[ "$should_edit" == "true" ]]; then
+        nano "$config_source" || echo "Warning: Failed to edit configuration file"
+    fi
+    
+    cp "$config_source" /etc/ugreen-leds.conf || error_exit "Failed to copy to /etc/ugreen-leds.conf"
+}
+
 if [[ -f "$CONFIG_FILE" ]]; then
     echo "Using existing configuration file at $CONFIG_FILE"
     echo ""
@@ -168,34 +217,26 @@ if [[ -f "$CONFIG_FILE" ]]; then
     echo "Note: The configuration file from the repository may have new options. Please review $TEMPLATE_CONFIG and update your $CONFIG_FILE if necessary."
     echo "################################################################################################################################################"
     echo ""
-    echo "Do you want to modify the LED configuration file now? (y/n)"
-    read -r MODIFY_CONF
-    # Validate user input
-    if [[ "$MODIFY_CONF" != "y" && "$MODIFY_CONF" != "n" ]]; then
-        echo "Invalid input. Skipping configuration modification."
-        MODIFY_CONF="n"
+    if prompt_yes_no "Do you want to modify the LED configuration file now?"; then
+        setup_config_file "$CONFIG_FILE" "true"
+    else
+        setup_config_file "$CONFIG_FILE" "false"
     fi
-    if [[ "$MODIFY_CONF" == "y" ]]; then
-        nano "$CONFIG_FILE" || echo "Warning: Failed to edit configuration file"
-    fi
-    cp "$CONFIG_FILE" /etc/ugreen-leds.conf || error_exit "Failed to copy configuration file to /etc/ugreen-leds.conf"
     echo "Configuration file $CONFIG_FILE for ugreen-leds copied to /etc/ugreen-leds.conf."
 else
-    echo "Do you want to modify the LED configuration file now? (y/n)"
-    read -r MODIFY_CONF
-    # Validate user input
-    if [[ "$MODIFY_CONF" != "y" && "$MODIFY_CONF" != "n" ]]; then
-        echo "Invalid input. Skipping configuration modification."
-        MODIFY_CONF="n"
+    if prompt_yes_no "Do you want to modify the LED configuration file now?"; then
+        setup_config_file "$TEMPLATE_CONFIG" "true"
+    else
+        setup_config_file "$TEMPLATE_CONFIG" "false"
     fi
-    if [[ "$MODIFY_CONF" == "y" ]]; then
-        nano "$TEMPLATE_CONFIG" || echo "Warning: Failed to edit template configuration file"
-    fi
-    cp "$TEMPLATE_CONFIG" /etc/ugreen-leds.conf || error_exit "Failed to copy template to /etc/ugreen-leds.conf"
     cp "$TEMPLATE_CONFIG" "$CONFIG_FILE" || error_exit "Failed to copy template to $CONFIG_FILE"
     chmod 644 /etc/ugreen-leds.conf
     echo "Configuration file for ugreen-leds saved as /etc/ugreen-leds.conf."
 fi
+
+# ============================================================================
+# Network Interface Detection and Service Setup
+# ============================================================================
 
 echo "Detecting network interfaces..."
 NETWORK_INTERFACES=($(ip -br link show | awk '$1 !~ /^(lo|docker|veth|br|vb)/ && $2 == "UP" {print $1}'))
@@ -229,6 +270,10 @@ else
         done
     fi
 fi
+
+# ============================================================================
+# Service Management
+# ============================================================================
 
 check_and_remove_existing_services() {
     local service_name="ugreen-netdevmon"

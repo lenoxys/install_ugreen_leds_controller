@@ -140,7 +140,7 @@ prompt_yes_no() {
     local prompt_text="$1"
     local response
     echo "$prompt_text (y/n)"
-    read -r response
+    read -r response < /dev/tty
     if [[ "$response" != "y" && "$response" != "n" ]]; then
         echo "Invalid input. Defaulting to 'n'."
         response="n"

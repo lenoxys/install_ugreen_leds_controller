@@ -5,6 +5,8 @@ This repository contains a bash script to install the necessary software for con
 ## Quick Installation
 **Always validate what the script does before running**</br>
 
+⚠️ **Important:** The script must be run from a directory under `/mnt/<POOL_NAME>/`. It will not work if run from `/home` or other locations.
+
 Run the following command to install:</br>
 ```bash
 curl -fsSL https://raw.githubusercontent.com/0x556c79/install_ugreen_leds_controller/main/install_ugreen_leds_controller.sh | sudo bash -s

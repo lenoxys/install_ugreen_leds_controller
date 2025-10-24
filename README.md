@@ -17,8 +17,11 @@ curl -sf https://raw.githubusercontent.com/0x556c79/install_ugreen_leds_controll
 
 ## Usage
 
+⚠️ **Important:** The script must be run from a directory under `/mnt/<POOL_NAME>/`. It will not work if run from `/home` or other locations.
+
 **Run the Script:**
 ```bash
+cd /mnt/<YOUR_POOL_NAME>
 ./install_ugreen_leds_controller.sh
 ```
 **Show Help:**
@@ -58,13 +61,18 @@ cd install-ugreen-leds-controller
 chmod +x install_ugreen_leds_controller.sh
 ```
 
-**Run the script:**
+**Run the script from a pool directory:**
+
+⚠️ **Important:** Navigate to a directory under `/mnt/<POOL_NAME>/` before running the script. The script will not work if run from `/home` or other locations.
 
 ```bash
+cd /mnt/<YOUR_POOL_NAME>
 ./install_ugreen_leds_controller.sh
 ```
 
 **Note:** This script might require administrative privileges (sudo) depending on your system configuration. 
+
+**Important Directory Requirement:** The script must be executed from a pool directory (`/mnt/<POOL_NAME>/`). Running from other locations like `/home` will result in an error and the script will not proceed. 
 
 This script will download and install the necessary software from [https://github.com/miskcoo/ugreen_leds_controller](https://github.com/miskcoo/ugreen_leds_controller) to control your Ugreen LED controller.
 

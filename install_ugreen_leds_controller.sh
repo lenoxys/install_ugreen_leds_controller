@@ -62,7 +62,6 @@ MODULE_URL=""
 CONFIG_FILE=""
 TEMPLATE_CONFIG=""
 CHOSEN_INTERFACE=""
-NETWORK_INTERFACES=()
 ACTIVE_INTERFACES=()
 SUPPORTED_VERSIONS=()
 
@@ -417,7 +416,7 @@ systemctl daemon-reload || error_exit "Failed to reload systemd daemon"
 
 enable_and_start_service "ugreen-diskiomon.service"
 
-if [ ${#NETWORK_INTERFACES[@]} -eq 0 ]; then
+if [ ${#ACTIVE_INTERFACES[@]} -eq 0 ]; then
     echo "Warning: No network interfaces detected. Skipping ugreen-netdevmon service setup."
 else
     # Validate CHOSEN_INTERFACE is set and contains only valid characters

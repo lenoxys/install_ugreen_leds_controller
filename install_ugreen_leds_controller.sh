@@ -347,36 +347,26 @@ fi
 # ============================================================================
 
 echo "Detecting network interfaces..."
-NETWORK_INTERFACES=($(ip -br link show | awk '$1 !~ /^(lo|docker|veth|br|vb)/ && $2 == "UP" {print $1}'))
+# Filter for physical network interfaces: exclude loopback, docker, bridges, virtual ethernet, and incus interfaces
+ACTIVE_INTERFACES=($(ip -br link show | awk '$1 !~ /^(lo|docker|veth|br-|vb|incus)/ && $2 == "UP" {print $1}'))
 
-if [ ${#NETWORK_INTERFACES[@]} -eq 0 ]; then
-    echo "Warning: No network interfaces detected. Skipping ugreen-netdevmon service setup."
+if [ ${#ACTIVE_INTERFACES[@]} -eq 0 ]; then
+    echo "Warning: No active network interfaces detected. Skipping ugreen-netdevmon service setup."
+elif [ ${#ACTIVE_INTERFACES[@]} -eq 1 ]; then
+    CHOSEN_INTERFACE="${ACTIVE_INTERFACES[0]}"
+    echo "Detected one active interface: ${CHOSEN_INTERFACE}."
 else
-    ACTIVE_INTERFACES=()
-    for interface in "${NETWORK_INTERFACES[@]}"; do
-        if ifconfig "$interface" 2>/dev/null | grep -q "UP"; then
-            ACTIVE_INTERFACES+=("$interface")
+    echo "Multiple active interfaces detected: ${ACTIVE_INTERFACES[*]}"
+    echo "Please choose one interface to use:"
+    select CHOSEN_INTERFACE in "${ACTIVE_INTERFACES[@]}"; do
+        # Validate selection
+        if [[ -n "$CHOSEN_INTERFACE" ]]; then
+            echo "You selected: ${CHOSEN_INTERFACE}"
+            break
+        else
+            echo "Invalid selection. Please try again."
         fi
     done
-
-    if [ ${#ACTIVE_INTERFACES[@]} -eq 0 ]; then
-        echo "No active interfaces detected. Skipping ugreen-netdevmon service setup."
-    elif [ ${#ACTIVE_INTERFACES[@]} -eq 1 ]; then
-        CHOSEN_INTERFACE="${ACTIVE_INTERFACES[0]}"
-        echo "Detected one active interface: ${CHOSEN_INTERFACE}."
-    else
-        echo "Multiple active interfaces detected: ${ACTIVE_INTERFACES[*]}"
-        echo "Please choose one interface to use:"
-        select CHOSEN_INTERFACE in "${ACTIVE_INTERFACES[@]}"; do
-            # Validate selection
-            if [[ -n "$CHOSEN_INTERFACE" ]]; then
-                echo "You selected: ${CHOSEN_INTERFACE}"
-                break
-            else
-                echo "Invalid selection. Please try again."
-            fi
-        done
-    fi
 fi
 
 # ============================================================================

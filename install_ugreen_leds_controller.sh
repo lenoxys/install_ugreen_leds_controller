@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Script constants
+readonly SCRIPT_NAME="$(basename "$0")"
+readonly CLONE_DIR_NAME="ugreen_leds_controller"
+readonly MAX_RETRIES=3
+readonly CURL_TIMEOUT=30
+
 # Cleanup function to remove the ugreen_leds_controller folder
 cleanup() {
-    echo "Cleaning up..."
-    rm -rf "$CLONE_DIR"
-    echo "Cleanup completed."
+    if [[ -n "${CLONE_DIR:-}" && -d "$CLONE_DIR" ]]; then
+        echo "Cleaning up..."
+        rm -rf "$CLONE_DIR" 2>/dev/null || echo "Warning: Failed to clean up $CLONE_DIR"
+        echo "Cleanup completed."
+    fi
 }
 
 # Error handler
@@ -14,8 +22,23 @@ error_exit() {
     exit 1
 }
 
+# Warning handler
+warn() {
+    echo "WARNING: $1" >&2
+}
+
 # Trap errors and cleanup
 trap cleanup EXIT
+
+# Check for required commands
+check_required_commands() {
+    local required_cmds=("curl" "git" "mount" "modprobe" "systemctl" "grep" "sed" "awk")
+    for cmd in "${required_cmds[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
+            error_exit "Required command not found: $cmd. Please install it and try again."
+        fi
+    done
+}
 
 # Utility function for user yes/no prompts
 prompt_yes_no() {
@@ -83,6 +106,9 @@ done
 # Pre-flight Checks
 # ============================================================================
 
+# Check for required commands
+check_required_commands
+
 # Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
     error_exit "Please run as root."
@@ -105,13 +131,40 @@ fi
 CLONE_DIR="$INSTALL_DIR/ugreen_leds_controller"
 
 # ============================================================================
+# Installation Confirmation
+# ============================================================================
+
+echo ""
+echo "╔════════════════════════════════════════════════════════════════════════════╗"
+echo "║         Ugreen LED Controller Installation Confirmation                    ║"
+echo "╚════════════════════════════════════════════════════════════════════════════╝"
+echo ""
+echo "This script will perform the following actions:"
+echo "  • Download and verify kernel module for TrueNAS ${TRUENAS_VERSION}"
+echo "  • Remount boot-pool datasets with write access"
+echo "  • Clone Ugreen LED Controller repository"
+echo "  • Install kernel modules and system services"
+echo "  • Configure LED control services"
+echo ""
+echo "⚠️  WARNING: This script modifies system files and mounts. Interruption may cause instability."
+echo ""
+
+if ! prompt_yes_no "Do you want to proceed with the installation?"; then
+    echo "Installation cancelled by user."
+    exit 0
+fi
+
+# ============================================================================
 # Version Detection and Validation
 # ============================================================================
 
 # Initialize an empty array for supported versions
 SUPPORTED_VERSIONS=()
 for URL in "${KMOD_URLS[@]}"; do
-    HTML_CONTENT=$(curl -s "$URL")
+    HTML_CONTENT=$(curl -s --max-time "$CURL_TIMEOUT" "$URL" 2>/dev/null) || {
+        warn "Failed to fetch from $URL. Skipping version detection from this URL."
+        continue
+    }
     VERSIONS=$(echo "$HTML_CONTENT" | grep -oE 'TrueNAS-SCALE-[^/]*/[0-9]+(\.[0-9]+)*' | grep -oE '[0-9]+(\.[0-9]+)*')
     while IFS= read -r VERSION; do
         SUPPORTED_VERSIONS+=("$VERSION")
@@ -130,7 +183,7 @@ fi
 TRUENAS_SERIES=$(echo "$TRUENAS_VERSION" | cut -d'.' -f1,2)
 
 # Resolve TrueNAS series to release name
-if [[ -v TRUENAS_SERIES_MAP["$TRUENAS_SERIES"] ]]; then
+if [[ ${TRUENAS_SERIES_MAP[$TRUENAS_SERIES]:-} ]]; then
     TRUENAS_NAME="${TRUENAS_SERIES_MAP[$TRUENAS_SERIES]}"
 else
     error_exit "Unsupported TrueNAS SCALE version series: ${TRUENAS_SERIES}. Please build the kernel module manually."
@@ -147,15 +200,15 @@ fi
 MODULE_URL="${REPO_URL}/${TRUENAS_NAME}/${TRUENAS_VERSION}/led-ugreen.ko"
 
 echo "Checking if kernel module exists for TrueNAS version ${TRUENAS_VERSION}..."
-if ! curl --head --silent --fail "${MODULE_URL}" > /dev/null 2>&1; then
+if ! curl --head --silent --fail --max-time "$CURL_TIMEOUT" "${MODULE_URL}" > /dev/null 2>&1; then
     error_exit "Kernel module not found for TrueNAS version ${TRUENAS_VERSION}. Please build the kernel module manually."
 fi
 
 BOOT_POOL_PATH="boot-pool/ROOT/${OS_VERSION}"
 
 echo "Remounting boot-pool datasets with write access..."
-mount -o remount,rw "${BOOT_POOL_PATH}/usr" || error_exit "Failed to remount ${BOOT_POOL_PATH}/usr"
-mount -o remount,rw "${BOOT_POOL_PATH}/etc" || error_exit "Failed to remount ${BOOT_POOL_PATH}/etc"
+mount -o remount,rw "${BOOT_POOL_PATH}/usr" || error_exit "Failed to remount ${BOOT_POOL_PATH}/usr. Verify the path exists and you have proper permissions."
+mount -o remount,rw "${BOOT_POOL_PATH}/etc" || error_exit "Failed to remount ${BOOT_POOL_PATH}/etc. Verify the path exists and you have proper permissions."
 
 # Clone the Ugreen LEDs Controller repository into subdirectory if not already present
 if [ ! -d "$CLONE_DIR/.git" ]; then
@@ -169,18 +222,22 @@ fi
 # Install the kernel module
 echo "Installing the kernel module..."
 mkdir -p "/lib/modules/$(uname -r)/extra" || error_exit "Failed to create kernel module directory"
-curl -so "/lib/modules/$(uname -r)/extra/led-ugreen.ko" "${MODULE_URL}" || error_exit "Kernel module download failed"
+curl -so --max-time "$CURL_TIMEOUT" "/lib/modules/$(uname -r)/extra/led-ugreen.ko" "${MODULE_URL}" || error_exit "Kernel module download failed"
 chmod 644 "/lib/modules/$(uname -r)/extra/led-ugreen.ko"
 
 # Create kernel module load configuration
 echo "Creating kernel module load configuration..."
+if [ ! -w "/etc/modules-load.d/" ]; then
+    error_exit "No write permission to /etc/modules-load.d/. Make sure you're running as root."
+fi
+
 cat <<EOL > /etc/modules-load.d/ugreen-led.conf
 i2c-dev
 led-ugreen
 ledtrig-oneshot
 ledtrig-netdev
 EOL
-chmod 644 /etc/modules-load.d/ugreen-led.conf
+chmod 644 /etc/modules-load.d/ugreen-led.conf || error_exit "Failed to set permissions on /etc/modules-load.d/ugreen-led.conf"
 
 echo "Loading kernel modules..."
 depmod || error_exit "Failed to run depmod"

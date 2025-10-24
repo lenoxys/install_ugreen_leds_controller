@@ -416,19 +416,15 @@ systemctl daemon-reload || error_exit "Failed to reload systemd daemon"
 
 enable_and_start_service "ugreen-diskiomon.service"
 
-if [ ${#ACTIVE_INTERFACES[@]} -eq 0 ]; then
-    echo "Warning: No network interfaces detected. Skipping ugreen-netdevmon service setup."
+# Validate CHOSEN_INTERFACE is set and contains only valid characters
+if [ -z "${CHOSEN_INTERFACE:-}" ]; then
+    echo "Warning: No network interface selected. Skipping ugreen-netdevmon service setup."
+elif ! [[ "$CHOSEN_INTERFACE" =~ ^[a-zA-Z0-9-]+$ ]]; then
+    error_exit "Invalid interface name: $CHOSEN_INTERFACE"
 else
-    # Validate CHOSEN_INTERFACE is set and contains only valid characters
-    if [ -z "${CHOSEN_INTERFACE:-}" ]; then
-        echo "Warning: No network interface selected. Skipping ugreen-netdevmon service setup."
-    elif ! [[ "$CHOSEN_INTERFACE" =~ ^[a-zA-Z0-9-]+$ ]]; then
-        error_exit "Invalid interface name: $CHOSEN_INTERFACE"
-    else
-        echo "Enabling and starting ugreen-netdevmon service for interface: ${CHOSEN_INTERFACE}..."
-        systemctl enable "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to enable ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
-        systemctl restart "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to restart ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
-    fi
+    echo "Enabling and starting ugreen-netdevmon service for interface: ${CHOSEN_INTERFACE}..."
+    systemctl enable "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to enable ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
+    systemctl restart "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to restart ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
 fi
 
 # Check if CONFIG_FILE exists before checking BLINK_TYPE_POWER

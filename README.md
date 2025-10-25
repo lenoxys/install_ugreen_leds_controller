@@ -7,16 +7,26 @@ This repository contains a bash script to install the necessary software for con
 
 ⚠️ **Important:** The script must be run from a directory under `/mnt/<POOL_NAME>/`. It will not work if run from `/home` or other locations.
 
-Run the following command to install:</br>
+Run the following command to download and install in one step:</br>
 ```bash
 cd /mnt/<YOUR_POOL_NAME>
-curl -fsSL https://raw.githubusercontent.com/0x556c79/install_ugreen_leds_controller/main/install_ugreen_leds_controller.sh | sudo bash -s
+curl -fsSL https://raw.githubusercontent.com/lenoxys/install_ugreen_leds_controller/main/install_ugreen_leds_controller.sh | sudo bash -s
 ```
 **What This Installer does:**
 
 - Clones the [ugreen_leds_controller](https://github.com/miskcoo/ugreen_leds_controller) repository
 - Copies the files to the required locations and loads the kernel modules
 - Starts the service
+
+## Key Features
+
+- **Configuration Updates**: On re-installation, the script properly applies new configurations by stopping and restarting services
+- **Service Management**: Automatically stops old services before replacing them with updated versions
+- **Network Detection**: Automatically detects available network interfaces and allows user selection for network device monitoring
+- **Conditional Service Setup**: 
+  - `ugreen-diskiomon` - Always enabled (disk activity monitoring)
+  - `ugreen-netdevmon` - Always enabled on selected interface (network activity monitoring)
+  - `ugreen-power-led` - Conditionally enabled based on configuration (power LED control)
 
 ## Usage
 

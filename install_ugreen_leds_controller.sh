@@ -135,6 +135,25 @@ enable_and_start_service() {
     systemctl enable "$service_name" || error_exit "Failed to enable $service_name"
 }
 
+# Helper function: Enable, start, or conditionally manage a service
+setup_service() {
+    local service_name="$1"
+    local should_enable="$2"
+    local reason="${3:-}"
+    
+    if [[ "$should_enable" == "true" ]]; then
+        if [[ -n "$reason" ]]; then
+            echo "Enabling and starting $service_name ($reason)..."
+        else
+            echo "Enabling and starting $service_name..."
+        fi
+        systemctl enable "$service_name" || error_exit "Failed to enable $service_name"
+        systemctl start "$service_name" || error_exit "Failed to start $service_name"
+    else
+        echo "Skipping $service_name (not enabled)."
+    fi
+}
+
 # Utility function for user yes/no prompts
 prompt_yes_no() {
     local prompt_text="$1"
@@ -397,7 +416,7 @@ echo "Detecting network interfaces..."
 ACTIVE_INTERFACES=($(ip -br link show | awk '$1 !~ /^(lo|docker|veth|br-|vb|incus)/ && $2 == "UP" {print $1}'))
 
 if [ ${#ACTIVE_INTERFACES[@]} -eq 0 ]; then
-    echo "Warning: No active network interfaces detected. Skipping ugreen-netdevmon service setup."
+    error_exit "No active network interfaces detected. A NAS requires at least one network connection."
 elif [ ${#ACTIVE_INTERFACES[@]} -eq 1 ]; then
     CHOSEN_INTERFACE="${ACTIVE_INTERFACES[0]}"
     echo "Detected one active interface: ${CHOSEN_INTERFACE}."
@@ -470,31 +489,22 @@ cp scripts/systemd/*.service "$SYSTEMD_SYSTEM_DIR" || error_exit "Failed to copy
 systemctl daemon-reload || error_exit "Failed to reload systemd daemon"
 
 echo "Starting LED services with updated service files..."
-enable_and_start_service "ugreen-diskiomon.service"
-
-# Validate CHOSEN_INTERFACE is set and contains only valid characters
-if [ -z "${CHOSEN_INTERFACE:-}" ]; then
-    echo "Warning: No network interface selected. Skipping ugreen-netdevmon service setup."
-elif ! [[ "$CHOSEN_INTERFACE" =~ ^[a-zA-Z0-9-]+$ ]]; then
-    error_exit "Invalid interface name: $CHOSEN_INTERFACE"
-else
-    echo "Enabling and starting ugreen-netdevmon service for interface: ${CHOSEN_INTERFACE}..."
-    systemctl enable "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to enable ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
-    systemctl start "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to start ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
-fi
 
 # Check if CONFIG_FILE exists before checking BLINK_TYPE_POWER
 if [ ! -f "$CONFIG_FILE" ]; then
     error_exit "Configuration file not found: $CONFIG_FILE"
 fi
 
-# Check if BLINK_TYPE_POWER is enabled
+# Determine if power LED should be enabled
+local power_led_enabled="false"
 if grep -qP '^BLINK_TYPE_POWER=(?!none$).+' "$CONFIG_FILE"; then
-    echo "Enabling and starting ugreen-power-led.service because BLINK_TYPE_POWER is set."
-    enable_and_start_service "ugreen-power-led.service"
-else
-    echo "BLINK_TYPE_POWER is set to 'none', not enabling ugreen-power-led.service."
+    power_led_enabled="true"
 fi
+
+# Setup all services with harmonized approach
+setup_service "ugreen-diskiomon.service" "true"
+setup_service "ugreen-netdevmon@${CHOSEN_INTERFACE}.service" "true" "interface: ${CHOSEN_INTERFACE}"
+setup_service "ugreen-power-led.service" "$power_led_enabled" "BLINK_TYPE_POWER enabled"
 
 cleanup
 

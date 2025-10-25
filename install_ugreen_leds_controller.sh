@@ -369,10 +369,8 @@ if [[ -f "$CONFIG_FILE" ]]; then
     echo "Note: The configuration file from the repository may have new options. Please review $TEMPLATE_CONFIG and update your $CONFIG_FILE if necessary."
     echo "################################################################################################################################################"
     echo ""
-    local config_updated=false
     if prompt_yes_no "Do you want to modify the LED configuration file now?"; then
         setup_config_file "$CONFIG_FILE" "true"
-        config_updated=true
     else
         setup_config_file "$CONFIG_FILE" "false"
     fi
@@ -434,13 +432,19 @@ check_and_remove_existing_services() {
                 echo "Warning: Invalid interface name extracted from service: $interface"
                 continue
             fi
-            echo "Found existing service for interface ${interface}. Removing..."
+            echo "Found existing service for interface ${interface}. Stopping..."
             systemctl stop "${service_name}@${interface}.service" 2>/dev/null || echo "Warning: Failed to stop ${service_name}@${interface}.service"
             systemctl disable "${service_name}@${interface}.service" 2>/dev/null || echo "Warning: Failed to disable ${service_name}@${interface}.service"
             rm -f "$service" || echo "Warning: Failed to remove service file"
             echo "Successfully removed ${service_name}@${interface}.service"
         fi
     done
+    
+    # Stop all ugreen services
+    echo "Stopping all ugreen services..."
+    systemctl stop ugreen-diskiomon.service 2>/dev/null || echo "Note: ugreen-diskiomon.service not running"
+    systemctl stop ugreen-power-led.service 2>/dev/null || echo "Note: ugreen-power-led.service not running"
+    
     systemctl daemon-reload || echo "Warning: Failed to reload systemd daemon"
 }
 
@@ -465,6 +469,7 @@ fi
 cp scripts/systemd/*.service "$SYSTEMD_SYSTEM_DIR" || error_exit "Failed to copy systemd service files"
 systemctl daemon-reload || error_exit "Failed to reload systemd daemon"
 
+echo "Starting LED services with updated service files..."
 enable_and_start_service "ugreen-diskiomon.service"
 
 # Validate CHOSEN_INTERFACE is set and contains only valid characters
@@ -475,7 +480,7 @@ elif ! [[ "$CHOSEN_INTERFACE" =~ ^[a-zA-Z0-9-]+$ ]]; then
 else
     echo "Enabling and starting ugreen-netdevmon service for interface: ${CHOSEN_INTERFACE}..."
     systemctl enable "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to enable ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
-    systemctl restart "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to restart ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
+    systemctl start "ugreen-netdevmon@${CHOSEN_INTERFACE}" || error_exit "Failed to start ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
 fi
 
 # Check if CONFIG_FILE exists before checking BLINK_TYPE_POWER
@@ -489,20 +494,6 @@ if grep -qP '^BLINK_TYPE_POWER=(?!none$).+' "$CONFIG_FILE"; then
     enable_and_start_service "ugreen-power-led.service"
 else
     echo "BLINK_TYPE_POWER is set to 'none', not enabling ugreen-power-led.service."
-fi
-
-# Restart services if configuration was updated (for previous installations)
-if [[ "${config_updated:-false}" == "true" ]]; then
-    echo ""
-    echo "Restarting LED services to apply configuration changes..."
-    systemctl restart ugreen-diskiomon.service || echo "Warning: Failed to restart ugreen-diskiomon.service"
-    if [ -n "${CHOSEN_INTERFACE:-}" ]; then
-        systemctl restart "ugreen-netdevmon@${CHOSEN_INTERFACE}.service" || echo "Warning: Failed to restart ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
-    fi
-    if grep -qP '^BLINK_TYPE_POWER=(?!none$).+' "$CONFIG_FILE"; then
-        systemctl restart ugreen-power-led.service || echo "Warning: Failed to restart ugreen-power-led.service"
-    fi
-    echo "LED services restarted with new configuration."
 fi
 
 cleanup

@@ -369,8 +369,10 @@ if [[ -f "$CONFIG_FILE" ]]; then
     echo "Note: The configuration file from the repository may have new options. Please review $TEMPLATE_CONFIG and update your $CONFIG_FILE if necessary."
     echo "################################################################################################################################################"
     echo ""
+    local config_updated=false
     if prompt_yes_no "Do you want to modify the LED configuration file now?"; then
         setup_config_file "$CONFIG_FILE" "true"
+        config_updated=true
     else
         setup_config_file "$CONFIG_FILE" "false"
     fi
@@ -487,6 +489,20 @@ if grep -qP '^BLINK_TYPE_POWER=(?!none$).+' "$CONFIG_FILE"; then
     enable_and_start_service "ugreen-power-led.service"
 else
     echo "BLINK_TYPE_POWER is set to 'none', not enabling ugreen-power-led.service."
+fi
+
+# Restart services if configuration was updated (for previous installations)
+if [[ "${config_updated:-false}" == "true" ]]; then
+    echo ""
+    echo "Restarting LED services to apply configuration changes..."
+    systemctl restart ugreen-diskiomon.service || echo "Warning: Failed to restart ugreen-diskiomon.service"
+    if [ -n "${CHOSEN_INTERFACE:-}" ]; then
+        systemctl restart "ugreen-netdevmon@${CHOSEN_INTERFACE}.service" || echo "Warning: Failed to restart ugreen-netdevmon@${CHOSEN_INTERFACE}.service"
+    fi
+    if grep -qP '^BLINK_TYPE_POWER=(?!none$).+' "$CONFIG_FILE"; then
+        systemctl restart ugreen-power-led.service || echo "Warning: Failed to restart ugreen-power-led.service"
+    fi
+    echo "LED services restarted with new configuration."
 fi
 
 cleanup

@@ -375,7 +375,13 @@ setup_config_file() {
     local should_edit="$2"
     
     if [[ "$should_edit" == "true" ]]; then
-        nano "$config_source" || echo "Warning: Failed to edit configuration file"
+        # Check if we have a terminal before trying to edit
+        if [ -t 0 ]; then
+            nano "$config_source" || echo "Warning: Failed to edit configuration file"
+        else
+            echo "Note: Running without terminal (piped script). Skipping interactive config editing."
+            echo "You can manually edit the config after installation at: /etc/ugreen-leds.conf"
+        fi
     fi
     
     cp "$config_source" /etc/ugreen-leds.conf || error_exit "Failed to copy to /etc/ugreen-leds.conf"

@@ -496,7 +496,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
 fi
 
 # Determine if power LED should be enabled
-local power_led_enabled="false"
+power_led_enabled="false"
 if grep -qP '^BLINK_TYPE_POWER=(?!none$).+' "$CONFIG_FILE"; then
     power_led_enabled="true"
 fi

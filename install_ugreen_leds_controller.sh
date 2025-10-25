@@ -375,11 +375,13 @@ setup_config_file() {
     local should_edit="$2"
     
     if [[ "$should_edit" == "true" ]]; then
-        # Check if we have a terminal before trying to edit
-        if [ -t 0 ]; then
+        # Try to edit with nano, redirecting to /dev/tty if available (works even with piped scripts)
+        if command -v nano &> /dev/null && [ -w /dev/tty ]; then
+            nano "$config_source" < /dev/tty > /dev/tty 2>&1 || echo "Warning: Failed to edit configuration file"
+        elif [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then
             nano "$config_source" || echo "Warning: Failed to edit configuration file"
         else
-            echo "Note: Running without terminal (piped script). Skipping interactive config editing."
+            echo "Note: Cannot open interactive editor. Skipping config editing."
             echo "You can manually edit the config after installation at: /etc/ugreen-leds.conf"
         fi
     fi
